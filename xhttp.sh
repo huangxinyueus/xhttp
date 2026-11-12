@@ -67,7 +67,7 @@ check_os() {
         ubuntu|debian) PKG_MANAGER="apt" ;;
         alpine) PKG_MANAGER="apk" ;;
         *) echo -e "${RED}暂不支持的系统: $OS。仅支持 Ubuntu, Debian, Alpine。${PLAIN}" && exit 1 ;;
-    es}
+    esac
 }
 
 install_dependencies() {
@@ -81,18 +81,17 @@ install_dependencies() {
 get_latest_version() {
     if [ "$ACTIVE_CORE" = "xray" ]; then
         TAG=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-        [ -z "$TAG" ] && TAG="25.x (获取失败)"
+        [ -z "$TAG" ] && TAG="25.x"
     else
         TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-        [ -z "$TAG" ] && TAG="1.10.x (获取失败)"
+        [ -z "$TAG" ] && TAG="1.10.x"
     fi
     echo "$TAG"
 }
 
-# 安装或切换指定的内核及版本
 install_core_version() {
-    CORE_TYPE="$1" # xray 或 sing-box
-    VERSION_TAG="$2" # 具体版本号或 latest
+    CORE_TYPE="$1"
+    VERSION_TAG="$2"
 
     check_os
     install_dependencies
@@ -108,7 +107,7 @@ install_core_version() {
             SB_ARCH="arm64" 
             ;;
         *) echo -e "${RED}不支持的架构: $ARCH${PLAIN}" && exit 1 ;;
-    es}
+    esac
 
     echo -e "${BLUE}正在部署 ${CORE_TYPE} 内核 (版本: ${VERSION_TAG})...${PLAIN}"
 
@@ -125,7 +124,6 @@ install_core_version() {
         chmod +x /usr/local/bin/xray
         rm -rf xray.zip /tmp/xray
         
-        # 配置 systemd / openrc 服务指向 xray
         setup_xray_service
         ACTIVE_CORE="xray"
         ACTIVE_VERSION="$VERSION_TAG"
@@ -209,8 +207,7 @@ generate_config() {
       "settings": {
         "clients": [
           {
-            "id": "$UUID",
-            "flow": ""
+            "id": "$UUID"
           }
         ],
         "decryption": "none"
@@ -366,7 +363,7 @@ do_install() {
 
     clear
     echo -e "${GREEN}======================================================${PLAIN}"
-    echo -e "${GREEN}  xhttp 安装成功！全局指令 'xhttp' 已生效               ${PLAIN}🥣"
+    echo -e "${GREEN}  xhttp 安装成功！全局指令 'xhttp' 已生效               ${PLAIN}"
     echo -e "${GREEN}======================================================${PLAIN}"
     echo -e "当前使用内核 : ${BLUE}${ACTIVE_CORE} (v${ACTIVE_VERSION})${PLAIN}"
     echo -e "当前协议组合 : ${BLUE}${SELECTED_PROTOCOL}${PLAIN}"
@@ -397,7 +394,6 @@ do_uninstall() {
     read -p "按回车键返回主菜单..."
 }
 
-# 菜单 5：内核版本多版本选择与降级
 kernel_menu() {
     while true; do
         clear
@@ -504,7 +500,7 @@ main_menu() {
     while true; do
         clear
         echo -e "${BLUE}========================================${PLAIN}"
-        echo -e "${BLUE}       xhttp 一键管理脚本 v3.0          ${PLAIN}"
+        echo -e "${BLUE}       xhttp 一键管理脚本 v3.1          ${PLAIN}"
         echo -e "${BLUE}========================================${PLAIN}"
         echo -e " ${YELLOW}【系统状态看板】${PLAIN}"
         echo -e " • 当前活跃内核     : ${GREEN}${ACTIVE_CORE} (版本: v${ACTIVE_VERSION})${PLAIN}"
