@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ====================================================================
-# Project Name: xhttp (Official sing-box core multi-protocol manager)
+# Project Name: xhttp (Xray-core & sing-box Dual-Core Multi-Version Manager)
 # Supported OS: Ubuntu, Debian, Alpine Linux
 # ====================================================================
 
@@ -31,6 +31,8 @@ load_status() {
         SUB_PORT=$((RANDOM % 40000 + 10000))
         SUB_PATH="$UUID"
         SUB_ENABLED="0"
+        ACTIVE_CORE="sing-box"
+        ACTIVE_VERSION="latest"
     fi
 }
 
@@ -46,6 +48,8 @@ UUID="$UUID"
 SUB_PORT="$SUB_PORT"
 SUB_PATH="$SUB_PATH"
 SUB_ENABLED="$SUB_ENABLED"
+ACTIVE_CORE="$ACTIVE_CORE"
+ACTIVE_VERSION="$ACTIVE_VERSION"
 EOF
 }
 
@@ -63,46 +67,118 @@ check_os() {
         ubuntu|debian) PKG_MANAGER="apt" ;;
         alpine) PKG_MANAGER="apk" ;;
         *) echo -e "${RED}暂不支持的系统: $OS。仅支持 Ubuntu, Debian, Alpine。${PLAIN}" && exit 1 ;;
-    esac
+    es}
 }
 
 install_dependencies() {
     if [ "$PKG_MANAGER" = "apt" ]; then
-        apt-get update -y && apt-get install -y curl wget jq tar ufw python3
+        apt-get update -y && apt-get install -y curl wget jq tar ufw python3 unzip
     elif [ "$PKG_MANAGER" = "apk" ]; then
-        apk update && apk add curl wget jq tar ufw iptables python3
+        apk update && apk add curl wget jq tar ufw iptables python3 unzip
     fi
 }
 
 get_latest_version() {
-    TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-    [ -z "$TAG" ] && TAG="1.10.0"
+    if [ "$ACTIVE_CORE" = "xray" ]; then
+        TAG=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+        [ -z "$TAG" ] && TAG="25.x (获取失败)"
+    else
+        TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+        [ -z "$TAG" ] && TAG="1.10.x (获取失败)"
+    fi
     echo "$TAG"
 }
 
-install_singbox() {
-    echo -e "${BLUE}正在获取最新官方 sing-box 内核...${PLAIN}"
-    TAG_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-    [ -z "$TAG_VER" ] && TAG_VER="1.10.0"
+# 安装或切换指定的内核及版本
+install_core_version() {
+    CORE_TYPE="$1" # xray 或 sing-box
+    VERSION_TAG="$2" # 具体版本号或 latest
+
+    check_os
+    install_dependencies
 
     ARCH=$(uname -m)
     case "$ARCH" in
-        x86_64) ARCH="amd64" ;;
-        aarch64) ARCH="arm64" ;;
+        x86_64) 
+            XRAY_ARCH="64"
+            SB_ARCH="amd64" 
+            ;;
+        aarch64) 
+            XRAY_ARCH="arm64-v8a"
+            SB_ARCH="arm64" 
+            ;;
         *) echo -e "${RED}不支持的架构: $ARCH${PLAIN}" && exit 1 ;;
-    esac
+    es}
 
-    DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${TAG_VER}/sing-box-${TAG_VER}-linux-${ARCH}.tar.gz"
-    curl -L -o sing-box.tar.gz "$DOWNLOAD_URL"
-    tar -xzf sing-box.tar.gz
-    mv sing-box-${TAG_VER}-linux-${ARCH}/sing-box /usr/local/bin/sing-box
-    chmod +x /usr/local/bin/sing-box
-    rm -rf sing-box.tar.gz sing-box-${TAG_VER}-linux-${ARCH}
+    echo -e "${BLUE}正在部署 ${CORE_TYPE} 内核 (版本: ${VERSION_TAG})...${PLAIN}"
+
+    if [ "$CORE_TYPE" = "xray" ]; then
+        if [ "$VERSION_TAG" = "latest" ]; then
+            DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${XRAY_ARCH}.zip"
+        else
+            DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/v${VERSION_TAG}/Xray-linux-${XRAY_ARCH}.zip"
+        fi
+
+        curl -L -o xray.zip "$DOWNLOAD_URL"
+        unzip -qo xray.zip -d /tmp/xray
+        mv /tmp/xray/xray /usr/local/bin/xray
+        chmod +x /usr/local/bin/xray
+        rm -rf xray.zip /tmp/xray
+        
+        # 配置 systemd / openrc 服务指向 xray
+        setup_xray_service
+        ACTIVE_CORE="xray"
+        ACTIVE_VERSION="$VERSION_TAG"
+
+    elif [ "$CORE_TYPE" = "sing-box" ]; then
+        if [ "$VERSION_TAG" = "latest" ]; then
+            TAG_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+            [ -z "$TAG_VER" ] && TAG_VER="1.10.0"
+            DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${TAG_VER}/sing-box-${TAG_VER}-linux-${SB_ARCH}.tar.gz"
+            VERSION_TAG="$TAG_VER"
+        else
+            DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION_TAG}/sing-box-${VERSION_TAG}-linux-${SB_ARCH}.tar.gz"
+        fi
+
+        curl -L -o sing-box.tar.gz "$DOWNLOAD_URL"
+        tar -xzf sing-box.tar.gz
+        mv sing-box-${VERSION_TAG}-linux-${SB_ARCH}/sing-box /usr/local/bin/sing-box
+        chmod +x /usr/local/bin/sing-box
+        rm -rf sing-box.tar.gz sing-box-${VERSION_TAG}-linux-${SB_ARCH}
+
+        setup_singbox_service
+        ACTIVE_CORE="sing-box"
+        ACTIVE_VERSION="$VERSION_TAG"
+    fi
+
+    save_status
+    echo -e "${GREEN}${CORE_TYPE} (v${VERSION_TAG}) 内核安装成功！${PLAIN}"
 }
 
-setup_service() {
+setup_xray_service() {
     if [ "$PKG_MANAGER" = "apt" ]; then
-        cat <<EOF > /etc/systemd/system/sing-box.service
+        cat <<EOF > /etc/systemd/system/xhttp.service
+[Unit]
+Description=xhttp Xray-core service
+After=network.target
+
+[Service]
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+ExecStart=/usr/local/bin/xray run -c /etc/xhttp/config.json
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload && systemctl enable xhttp && systemctl restart xhttp
+    fi
+}
+
+setup_singbox_service() {
+    if [ "$PKG_MANAGER" = "apt" ]; then
+        cat <<EOF > /etc/systemd/system/xhttp.service
 [Unit]
 Description=xhttp sing-box service
 After=network.target
@@ -111,52 +187,45 @@ After=network.target
 User=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/xhttp/config.json
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 EOF
-        systemctl daemon-reload && systemctl enable sing-box
-    elif [ "$PKG_MANAGER" = "apk" ]; then
-        cat <<EOF > /etc/init.d/sing-box
-#!/sbin/openrc-run
-name="sing-box"
-command="/usr/local/bin/sing-box"
-command_args="run -c /etc/sing-box/config.json"
-pidfile="/run/sing-box.pid"
-command_background="yes"
-depend() { need net; }
-EOF
-        chmod +x /etc/init.d/sing-box && rc-update add sing-box default
+        systemctl daemon-reload && systemctl enable xhttp && systemctl restart xhttp
     fi
 }
 
 generate_config() {
-    mkdir -p /etc/sing-box
-    cat <<EOF > /etc/sing-box/config.json
+    mkdir -p /etc/xhttp
+    cat <<EOF > /etc/xhttp/config.json
 {
-  "log": { "level": "info", "timestamp": true },
+  "log": { "loglevel": "info" },
   "inbounds": [
     {
-      "type": "vless",
-      "tag": "xhttp-inbound",
-      "listen": "::",
-      "listen_port": ${CUSTOM_PORT},
-      "users": [
-        {
-          "name": "xhttp-user",
-          "uuid": "$UUID"
+      "port": ${CUSTOM_PORT},
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "$UUID",
+            "flow": ""
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "xhttpSettings": {
+          "path": "/${UUID}-argo",
+          "mode": "auto"
         }
-      ],
-      "transport": {
-        "type": "xhttp",
-        "path": "/${UUID}-argo",
-        "mode": "auto"
       }
     }
   ],
-  "outbounds": [{ "type": "direct", "tag": "direct" }]
+  "outbounds": [{ "protocol": "direct" }]
 }
 EOF
 }
@@ -165,7 +234,6 @@ get_links() {
     LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
     [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
 
-    # 严格匹配您提供的标准模板：地址使用优质CDN节点，SNI/Host 指向 Argo 隧道域名
     if [ -n "$TUNNEL_DOMAIN" ]; then
         SNI_HOST="$TUNNEL_DOMAIN"
     else
@@ -173,8 +241,6 @@ get_links() {
     fi
 
     XHTTP_PATH="/${UUID}-argo"
-    
-    # 完全对齐您提供的 H2 和 H3 标准格式
     H2_ADDR="www.visa.com.hk"
     H3_ADDR="www.teamviewer.com"
 
@@ -221,53 +287,6 @@ proxies:
     skip-cert-verify: true
 EOF
 
-    cat <<EOF > "$SUB_DIR/$SUB_PATH/sbox.json"
-{
-  "outbounds": [
-    {
-      "type": "vless",
-      "tag": "H2-Argo-XHTTP",
-      "server": "${H2_ADDR}",
-      "server_port": 443,
-      "uuid": "${UUID}",
-      "transport": {
-        "type": "xhttp",
-        "path": "${XHTTP_PATH}",
-        "mode": "auto",
-        "host": "${SNI_HOST}"
-      },
-      "tls": {
-        "enabled": true,
-        "server_name": "${SNI_HOST}",
-        "utls": { "enabled": true, "fingerprint": "chrome" },
-        "alpn": ["h2"],
-        "insecure": true
-      }
-    },
-    {
-      "type": "vless",
-      "tag": "H3-Argo-XHTTP",
-      "server": "${H3_ADDR}",
-      "server_port": 443,
-      "uuid": "${UUID}",
-      "transport": {
-        "type": "xhttp",
-        "path": "${XHTTP_PATH}",
-        "mode": "auto",
-        "host": "${SNI_HOST}"
-      },
-      "tls": {
-        "enabled": true,
-        "server_name": "${SNI_HOST}",
-        "utls": { "enabled": true, "fingerprint": "chrome" },
-        "alpn": ["h3"],
-        "insecure": true
-      }
-    }
-  ]
-}
-EOF
-
     cat <<EOF > "$SUB_DIR/$SUB_PATH/jhsub.txt"
 ${TCP_LINK}
 ${UDP_LINK}
@@ -297,16 +316,8 @@ protocol_menu() {
         case "$proto_choice" in
             1) SELECTED_PROTOCOL="Vless-xhttp-reality-enc" ;;
             2) SELECTED_PROTOCOL="Vless-xhttp-enc" ;;
-            3) 
-                SELECTED_PROTOCOL="Vless-xhttp-tls-UDP"
-                read -p "请输入您的合法域名 (直接回车跳过): " input_domain
-                [ -n "$input_domain" ] && DOMAIN="$input_domain"
-                ;;
-            4) 
-                SELECTED_PROTOCOL="Vless-xhttp-tls-TCP/UDP"
-                read -p "请输入您的合法域名 (直接回车跳过): " input_domain
-                [ -n "$input_domain" ] && DOMAIN="$input_domain"
-                ;;
+            3) SELECTED_PROTOCOL="Vless-xhttp-tls-UDP" ;;
+            4) SELECTED_PROTOCOL="Vless-xhttp-tls-TCP/UDP" ;;
             0) save_status; return ;;
             "") ;;
             *) echo -e "${RED}无效选择！${PLAIN}"; sleep 1; continue ;;
@@ -343,18 +354,8 @@ do_install() {
         return
     fi
 
-    check_os
-    echo -e "${BLUE}开始安装环境与官方内核...${PLAIN}"
-    install_dependencies
-    install_singbox
     generate_config
-    setup_service
-
-    if [ "$PKG_MANAGER" = "apt" ]; then
-        systemctl restart sing-box
-    elif [ "$PKG_MANAGER" = "apk" ]; then
-        rc-service sing-box restart
-    fi
+    install_core_version "$ACTIVE_CORE" "$ACTIVE_VERSION"
 
     cp "$0" /usr/local/bin/xhttp
     chmod +x /usr/local/bin/xhttp
@@ -365,12 +366,12 @@ do_install() {
 
     clear
     echo -e "${GREEN}======================================================${PLAIN}"
-    echo -e "${GREEN}  xhttp 安装成功！全局指令 'xhttp' 已生效               ${PLAIN}"
+    echo -e "${GREEN}  xhttp 安装成功！全局指令 'xhttp' 已生效               ${PLAIN}🥣"
     echo -e "${GREEN}======================================================${PLAIN}"
+    echo -e "当前使用内核 : ${BLUE}${ACTIVE_CORE} (v${ACTIVE_VERSION})${PLAIN}"
     echo -e "当前协议组合 : ${BLUE}${SELECTED_PROTOCOL}${PLAIN}"
     echo -e "服务监听端口 : ${BLUE}${CUSTOM_PORT}${PLAIN}"
     echo -e "Argo 隧道域名: ${BLUE}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
-    echo -e "节点 UUID    : ${BLUE}${UUID}${PLAIN}"
     echo -e "------------------------------------------------------"
     echo -e "${YELLOW}【H2-Argo XHTTP 节点链接】${PLAIN}"
     echo -e "${GREEN}${TCP_LINK}${PLAIN}"
@@ -382,25 +383,62 @@ do_install() {
 }
 
 do_uninstall() {
-    read -p "确认要完全卸载 xhttp (sing-box) 吗？[y/N]: " confirm
+    read -p "确认要完全卸载 xhttp 吗？[y/N]: " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        check_os
-        if [ "$PKG_MANAGER" = "apt" ]; then
-            systemctl stop sing-box 2>/dev/null
-            systemctl disable sing-box 2>/dev/null
-            rm -f /etc/systemd/system/sing-box.service
-            systemctl daemon-reload
-        elif [ "$PKG_MANAGER" = "apk" ]; then
-            rc-service sing-box stop 2>/dev/null
-            rc-update del sing-box default 2>/dev/null
-            rm -f /etc/init.d/sing-box
-        fi
-        rm -rf /usr/local/bin/sing-box /etc/sing-box /etc/xhttp /usr/local/bin/xhttp
-        echo -e "${GREEN}xhttp 已完全卸载。${PLAIN}"
+        systemctl stop xhttp 2>/dev/null
+        systemctl disable xhttp 2>/dev/null
+        rm -f /etc/systemd/system/xhttp.service
+        systemctl daemon-reload
+        rm -rf /usr/local/bin/xray /usr/local/bin/sing-box /etc/xhttp /usr/local/bin/xhttp
+        echo -e "${GREEN}xhttp 及相关内核已完全卸载。${PLAIN}"
     else
         echo -e "${YELLOW}已取消卸载。${PLAIN}"
     fi
     read -p "按回车键返回主菜单..."
+}
+
+# 菜单 5：内核版本多版本选择与降级
+kernel_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}=== 内核版本选择与双核切换管理 ===${PLAIN}"
+        echo -e "当前运行内核 : ${GREEN}${ACTIVE_CORE} (当前版本: v${ACTIVE_VERSION})${PLAIN}"
+        echo -e "----------------------------------------"
+        echo -e " 1. Xray-core 内核版本管理 (推荐稳定/支持XHTTP)"
+        echo -e " 2. sing-box 内核版本管理 (官方多协议原生支持)"
+        echo -e " 0. 返回上一层主菜单"
+        echo -e "========================================"
+        read -p "请选择操作 [0-2]: " k_choice
+
+        case "$k_choice" in
+            1)
+                clear
+                echo -e "${BLUE}=== Xray-core 版本列表 ===${PLAIN}"
+                echo -e " [🔥 最新版本建议] 官方最新稳定版 (Latest)"
+                echo -e " [📌 经典历史版本] v1.8.24 (高稳定性版)"
+                echo -e " [📌 历史版本]     v1.8.23"
+                echo -e "----------------------------------------"
+                read -p "请输入要安装的 Xray 版本号 (直接输入版本号如 1.8.24 或输入 latest): " x_ver
+                [ -z "$x_ver" ] && x_ver="latest"
+                install_core_version "xray" "$x_ver"
+                read -p "按回车键继续..."
+                ;;
+            2)
+                clear
+                echo -e "${BLUE}=== sing-box 版本列表 ===${PLAIN}"
+                echo -e " [🔥 最新版本建议] 官方最新稳定版 (Latest)"
+                echo -e " [📌 经典历史版本] 1.10.2 (广泛兼容版)"
+                echo -e " [📌 历史版本]     1.9.8"
+                echo -e "----------------------------------------"
+                read -p "请输入要安装的 sing-box 版本号 (如 1.10.2 或输入 latest): " s_ver
+                [ -z "$s_ver" ] && s_ver="latest"
+                install_core_version "sing-box" "$s_ver"
+                read -p "按回车键继续..."
+                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项！${PLAIN}"; sleep 1 ;;
+        esac
+    done
 }
 
 sub_menu() {
@@ -429,7 +467,6 @@ sub_menu() {
                 echo -e "${YELLOW}【H3-Argo 节点链接】${PLAIN}${GREEN}${UDP_LINK}${PLAIN}"
                 echo -e "----------------------------------------"
                 echo -e "Clash/Mihomo 订阅地址: http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/clmi.yaml"
-                echo -e "Sing-box 订阅地址   : http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/sbox.json"
                 echo -e "聚合协议 订阅地址   : http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/jhsub.txt"
                 echo -e "----------------------------------------"
                 read -p "按回车键继续..."
@@ -464,19 +501,16 @@ sub_menu() {
 }
 
 main_menu() {
-    LATEST_VER=$(get_latest_version)
-
     while true; do
         clear
         echo -e "${BLUE}========================================${PLAIN}"
-        echo -e "${BLUE}       xhttp 一键管理脚本 v2.7          ${PLAIN}"
+        echo -e "${BLUE}       xhttp 一键管理脚本 v3.0          ${PLAIN}"
         echo -e "${BLUE}========================================${PLAIN}"
         echo -e " ${YELLOW}【系统状态看板】${PLAIN}"
-        echo -e " • 官方最新内核版本 : ${GREEN}v${LATEST_VER}${PLAIN}"
+        echo -e " • 当前活跃内核     : ${GREEN}${ACTIVE_CORE} (版本: v${ACTIVE_VERSION})${PLAIN}"
         echo -e " • 当前协议组合     : ${GREEN}${SELECTED_PROTOCOL:-未配置}${PLAIN}"
         echo -e " • 监听服务端口     : ${GREEN}${CUSTOM_PORT}${PLAIN}"
         echo -e " • 固定隧道域名     : ${GREEN}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
-        echo -e " • 隧道Token状态    : ${GREEN}${TUNNEL_STATUS}${PLAIN}"
         if [ "$SUB_ENABLED" = "1" ]; then
             echo -e " • 本地订阅服务     : ${GREEN}运行中 (端口: ${SUB_PORT}) [路径: /${SUB_PATH}/]${PLAIN}"
         else
@@ -484,20 +518,22 @@ main_menu() {
         fi
         echo -e "----------------------------------------"
         echo -e " 1. 配置并选择协议组合与隧道"
-        echo -e " 2. 确认安装 xhttp 节点 (生成标准 Argo H2/H3 节点与订阅)"
+        echo -e " 2. 确认安装 xhttp 节点 (自动生成内核与订阅)"
         echo -e " 3. 卸载脚本及内核"
         echo -e " 4. 设置本地IP订阅分享链接"
+        echo -e " 5. 内核版本选择与双核切换管理 (支持新老版本降级)"
         echo -e " 0. 退出脚本"
         echo -e "========================================"
-        read -p "请选择操作 [0-4]: " main_choice
+        read -p "请选择操作 [0-5]: " main_choice
 
         case "$main_choice" in
             1) protocol_menu ;;
             2) do_install ;;
             3) do_uninstall ;;
             4) sub_menu ;;
+            5) kernel_menu ;;
             0) exit 0 ;;
-            *) echo -e "${RED}无效选项，请输入 0-4！${PLAIN}"; sleep 1 ;;
+            *) echo -e "${RED}无效选项，请输入 0-5！${PLAIN}"; sleep 1 ;;
         esac
     done
 }
