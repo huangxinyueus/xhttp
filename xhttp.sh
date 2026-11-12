@@ -22,10 +22,11 @@ load_status() {
         source "$STATUS_FILE"
     else
         SELECTED_PROTOCOL=""
-        CUSTOM_PORT="443"
+        # 默认随机生成一个 10000-60000 之间的端口
+        CUSTOM_PORT=$((RANDOM % 50000 + 10000))
         DOMAIN=""
         TUNNEL_TYPE="未绑定"
-        TUNNEL_TARGET=""
+        TUNNEL_DOMAIN=""
         UUID=$(cat /proc/sys/kernel/random/uuid)
         SUB_PORT="11111"
         SUB_PATH="$UUID"
@@ -39,7 +40,7 @@ SELECTED_PROTOCOL="$SELECTED_PROTOCOL"
 CUSTOM_PORT="$CUSTOM_PORT"
 DOMAIN="$DOMAIN"
 TUNNEL_TYPE="$TUNNEL_TYPE"
-TUNNEL_TARGET="$TUNNEL_TARGET"
+TUNNEL_DOMAIN="$TUNNEL_DOMAIN"
 UUID="$UUID"
 SUB_PORT="$SUB_PORT"
 SUB_PATH="$SUB_PATH"
@@ -166,9 +167,10 @@ generate_sub_files() {
     LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
     [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
 
+    # Clash/Mihomo 订阅 (同时支持 TCP 和 UDP 对应协议流控分发)
     cat <<EOF > "$SUB_DIR/$SUB_PATH/clmi.yaml"
 proxies:
-  - name: "xhttp-${SELECTED_PROTOCOL}"
+  - name: "xhttp-${SELECTED_PROTOCOL}-TCP"
     type: vless
     server: ${LOCAL_IP}
     port: ${CUSTOM_PORT}
@@ -179,39 +181,62 @@ proxies:
     tls: true
     flow: xtls-rprx-vision
     skip-cert-verify: true
+  - name: "xhttp-${SELECTED_PROTOCOL}-UDP"
+    type: vless
+    server: ${LOCAL_IP}
+    port: ${CUSTOM_PORT}
+    uuid: ${UUID}
+    network: xhttp
+    xhttp:
+      path: "/xhttp"
+    tls: true
+    packet-encoding: xudp
+    skip-cert-verify: true
 EOF
 
+    # Sing-box 订阅 (包含 TCP 与 UDP 通道)
     cat <<EOF > "$SUB_DIR/$SUB_PATH/sbox.json"
 {
   "outbounds": [
     {
       "type": "vless",
-      "tag": "xhttp-node",
+      "tag": "xhttp-node-TCP",
       "server": "${LOCAL_IP}",
       "server_port": ${CUSTOM_PORT},
       "uuid": "${UUID}",
       "flow": "xtls-rprx-vision",
+      "transport": {
+        "type": "xhttp",
+        "path": "/xhttp"
+      },
+      "tls": { "enabled": true, "insecure": true }
+    },
+    {
+      "type": "vless",
+      "tag": "xhttp-node-UDP",
+      "server": "${LOCAL_IP}",
+      "server_port": ${CUSTOM_PORT},
+      "uuid": "${UUID}",
       "packet_encoding": "xudp",
       "transport": {
         "type": "xhttp",
         "path": "/xhttp"
       },
-      "tls": {
-        "enabled": true,
-        "insecure": true
-      }
+      "tls": { "enabled": true, "insecure": true }
     }
   ]
 }
 EOF
 
+    # 聚合协议文本 (TCP & UDP 混输)
     cat <<EOF > "$SUB_DIR/$SUB_PATH/jhsub.txt"
-vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-%E8%81%9A%E5%90%88%E8%AE%A2%E9%98%85
+vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-TCP隧道
+vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-UDP隧道
 EOF
 
+    # 安全地后台启动订阅服务器，避免 OLDPWD 报错
     pkill -f "python3 -m http.server $SUB_PORT" 2>/dev/null
-    cd "$SUB_DIR" && nohup python3 -m http.server "$SUB_PORT" >/dev/null 2>&1 &
-    cd - >/dev/null
+    (cd "$SUB_DIR" && nohup python3 -m http.server "$SUB_PORT" >/dev/null 2>&1 &)
 }
 
 protocol_menu() {
@@ -220,7 +245,7 @@ protocol_menu() {
         echo -e "${BLUE}=== xhttp 协议组合与隧道配置菜单 ===${PLAIN}"
         echo -e "当前已选协议: ${GREEN}${SELECTED_PROTOCOL:-未选择}${PLAIN}"
         echo -e "当前端口设定: ${GREEN}${CUSTOM_PORT}${PLAIN}"
-        echo -e "当前隧道状态: ${GREEN}${TUNNEL_TYPE} (${TUNNEL_TARGET:-无})${PLAIN}"
+        echo -e "当前隧道域名: ${GREEN}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
         echo -e "----------------------------------------"
         echo -e "1. Vless-xhttp-reality-enc        (支持固定隧道，无须域名)"
         echo -e "2. Vless-xhttp-enc                (原生加密流控，支持隧道)"
@@ -266,21 +291,21 @@ protocol_menu() {
                 ;;
         esac
 
-        read -p "请输入自定义端口 [默认 443，直接回车下一步]: " input_port
+        read -p "请输入自定义端口 [留空或直接回车则保持随机端口 ${CUSTOM_PORT}]: " input_port
         if [ -n "$input_port" ]; then
             CUSTOM_PORT="$input_port"
         fi
 
         if [[ "$SELECTED_PROTOCOL" == *"reality"* || "$SELECTED_PROTOCOL" == *"enc"* ]]; then
             echo -e "----------------------------------------"
-            read -p "是否需要配置固定隧道 / Cloudflare Tunnel Token? [y/N]: " configure_tunnel
+            read -p "是否需要配置固定隧道域名？[y/N]: " configure_tunnel
             if [[ "$configure_tunnel" =~ ^[Yy]$ ]]; then
-                read -p "请输入隧道类型 (例如: cloudflare/argo): " TUNNEL_TYPE
-                read -p "请输入隧道域名或 Token 密钥: " TUNNEL_TARGET
-                echo -e "${GREEN}隧道参数已记录！${PLAIN}"
+                read -p "请输入您的固定隧道绑定域名 (如 tunnel.yourdomain.com): " TUNNEL_DOMAIN
+                TUNNEL_TYPE="已绑定"
+                echo -e "${GREEN}固定隧道域名已记录！${PLAIN}"
             else
                 TUNNEL_TYPE="未绑定"
-                TUNNEL_TARGET=""
+                TUNNEL_DOMAIN=""
             fi
         fi
 
@@ -350,8 +375,8 @@ sub_menu() {
     while true; do
         clear
         echo -e "${BLUE}=== 设置本地IP订阅分享链接 ===${PLAIN}"
-        echo -e " 1: 重置安装本地 IP 订阅链接"
-        echo -e " 2: 更换订阅链接路径密码"
+        echo -e " 1: 重置安装/生成本地 IP 订阅链接"
+        echo -e " 2: 更换订阅链接路径密码 (默认与UUID同路径)"
         echo -e " 3: 更换订阅链接端口"
         echo -e " 4: 卸载本地 IP 订阅链接"
         echo -e " 0: 返回上一层"
@@ -374,19 +399,27 @@ sub_menu() {
                 read -p "按回车键继续..."
                 ;;
             2)
-                read -p "请输入新的路径密码 (UUID 格式或自定义字符串): " new_path
-                [ -n "$new_path" ] && SUB_PATH="$new_path"
+                read -p "请输入新的路径密码 (直接回车可恢复默认节点UUID路径): " new_path
+                if [ -n "$new_path" ]; then
+                    SUB_PATH="$new_path"
+                else
+                    SUB_PATH="$UUID"
+                fi
                 generate_sub_files
                 save_status
-                echo -e "${GREEN}订阅路径密码已更新！${PLAIN}"
+                echo -e "${GREEN}订阅路径密码已更新为: ${SUB_PATH}${PLAIN}"
                 read -p "按回车键继续..."
                 ;;
             3)
-                read -p "请输入新的订阅端口 [默认 11111]: " new_port
-                [ -n "$new_port" ] && SUB_PORT="$new_port"
+                read -p "请输入新的订阅端口 [默认 11111, 留空则随机]: " new_port
+                if [ -n "$new_port" ]; then
+                    SUB_PORT="$new_port"
+                else
+                    SUB_PORT=$((RANDOM % 40000 + 10000))
+                fi
                 generate_sub_files
                 save_status
-                echo -e "${GREEN}订阅端口已更新！${PLAIN}"
+                echo -e "${GREEN}订阅端口已更新为: ${SUB_PORT}${PLAIN}"
                 read -p "按回车键继续..."
                 ;;
             4)
@@ -413,20 +446,20 @@ main_menu() {
     while true; do
         clear
         echo -e "${BLUE}========================================${PLAIN}"
-        echo -e "${BLUE}       xhttp 一键管理脚本 v2.0          ${PLAIN}"
+        echo -e "${BLUE}       xhttp 一键管理脚本 v2.1          ${PLAIN}"
         echo -e "${BLUE}========================================${PLAIN}"
         echo -e " ${YELLOW}【系统状态看板】${PLAIN}"
         echo -e " • 官方最新内核版本 : ${GREEN}v${LATEST_VER}${PLAIN}"
         echo -e " • 当前协议组合     : ${GREEN}${SELECTED_PROTOCOL:-未配置}${PLAIN}"
         echo -e " • 监听服务端口     : ${GREEN}${CUSTOM_PORT}${PLAIN}"
-        echo -e " • 隧道绑定状态     : ${GREEN}${TUNNEL_TYPE} (${TUNNEL_TARGET:-无})${PLAIN}"
+        echo -e " • 固定隧道域名     : ${GREEN}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
         if [ "$SUB_ENABLED" = "1" ]; then
-            echo -e " • 本地订阅服务     : ${GREEN}运行中 (端口: ${SUB_PORT})${PLAIN}"
+            echo -e " • 本地订阅服务     : ${GREEN}运行中 (端口: ${SUB_PORT}) [路径: /${SUB_PATH}/]${PLAIN}"
         else
             echo -e " • 本地订阅服务     : ${YELLOW}未开启${PLAIN}"
         fi
         echo -e "----------------------------------------"
-        echo -e " 1. 配置并选择协议组合与隧道"
+        echo -e " 1. 配置并选择协议组合与隧道域名"
         echo -e " 2. 确认安装 xhttp 节点 (注册快捷指令 'xhttp')"
         echo -e " 3. 卸载脚本及内核"
         echo -e " 4. 设置本地IP订阅分享链接"
