@@ -12,7 +12,6 @@ PLAIN='\033[0m'
 
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：请以 root 用户运行此脚本！${PLAIN}" && exit 1
 
-# 默认全局配置变量
 SELECTED_PROTOCOL=""
 CUSTOM_PORT="443"
 DOMAIN=""
@@ -30,7 +29,7 @@ check_os() {
         ubuntu|debian) PKG_MANAGER="apt" ;;
         alpine) PKG_MANAGER="apk" ;;
         *) echo -e "${RED}暂不支持的系统: $OS。仅支持 Ubuntu, Debian, Alpine。${PLAIN}" && exit 1 ;;
-    es}
+    esac
 }
 
 install_dependencies() {
@@ -51,7 +50,7 @@ install_singbox() {
         x86_64) ARCH="amd64" ;;
         aarch64) ARCH="arm64" ;;
         *) echo -e "${RED}不支持的架构: $ARCH${PLAIN}" && exit 1 ;;
-    es}
+    esac
 
     DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${TAG}/sing-box-${TAG}-linux-${ARCH}.tar.gz"
     curl -L -o sing-box.tar.gz "$DOWNLOAD_URL"
@@ -95,8 +94,6 @@ EOF
 
 generate_config() {
     mkdir -p /etc/sing-box
-    
-    # 根据用户选择生成对应的 JSON 核心配置
     cat <<EOF > /etc/sing-box/config.json
 {
   "log": { "level": "info", "timestamp": true },
@@ -124,7 +121,6 @@ generate_config() {
 EOF
 }
 
-# 协议组合交互子菜单
 protocol_menu() {
     while true; do
         clear
@@ -173,9 +169,8 @@ protocol_menu() {
                 sleep 1
                 continue
                 ;;
-        es}
+        esac
 
-        # 设置自定义端口（支持直接回车下一步）
         read -p "请输入自定义端口 [默认 443，直接回车下一步]: " input_port
         if [ -n "$input_port" ]; then
             CUSTOM_PORT="$input_port"
@@ -186,7 +181,6 @@ protocol_menu() {
     done
 }
 
-# 主安装逻辑
 do_install() {
     if [ -z "$SELECTED_PROTOCOL" ]; then
         echo -e "${RED}错误：您尚未在菜单 1 中选择任何协议组合！请先选择协议。${PLAIN}"
@@ -216,7 +210,6 @@ do_install() {
     read -p "按回车键返回主菜单..."
 }
 
-# 卸载逻辑
 do_uninstall() {
     read -p "确认要完全卸载 xhttp (sing-box) 吗？[y/N]: " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
@@ -239,7 +232,6 @@ do_uninstall() {
     read -p "按回车键返回主菜单..."
 }
 
-# 主菜单循环
 main_menu() {
     while true; do
         clear
@@ -258,10 +250,9 @@ main_menu() {
             2) do_install ;;
             3) do_uninstall ;;
             0) exit 0 ;;
-            *) echo -e "${RED}无效选项，请输入 0-3！${PLAIN}º"; sleep 1 ;;
-        es}
+            *) echo -e "${RED}无效选项，请输入 0-3！${PLAIN}"; sleep 1 ;;
+        esac
     done
 }
 
-# 启动入口
 main_menu
