@@ -161,23 +161,34 @@ generate_config() {
 EOF
 }
 
-generate_sub_files() {
-    SUB_DIR="$CONFIG_DIR/sub"
-    mkdir -p "$SUB_DIR/$SUB_PATH"
-    
+get_links() {
     LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
     [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
 
-    # 生成真实的 TCP 和 UDP 节点分享链接
-    TCP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-TCP"
-    UDP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-UDP"
+    # 如果绑定了固定隧道域名，则节点地址使用隧道域名，端口默认 443（支持 CF 标准边缘端口）
+    if [ -n "$TUNNEL_DOMAIN" ]; then
+        HOST_ADDR="$TUNNEL_DOMAIN"
+        LINK_PORT="443"
+    else
+        HOST_ADDR="$LOCAL_IP"
+        LINK_PORT="$CUSTOM_PORT"
+    fi
+
+    TCP_LINK="vless://${UUID}@${HOST_ADDR}:${LINK_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-TCP隧道"
+    UDP_LINK="vless://${UUID}@${HOST_ADDR}:${LINK_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-UDP隧道"
+}
+
+generate_sub_files() {
+    SUB_DIR="$CONFIG_DIR/sub"
+    mkdir -p "$SUB_DIR/$SUB_PATH"
+    get_links
 
     cat <<EOF > "$SUB_DIR/$SUB_PATH/clmi.yaml"
 proxies:
   - name: "xhttp-${SELECTED_PROTOCOL}-TCP"
     type: vless
-    server: ${LOCAL_IP}
-    port: ${CUSTOM_PORT}
+    server: ${HOST_ADDR}
+    port: ${LINK_PORT}
     uuid: ${UUID}
     network: xhttp
     xhttp:
@@ -187,8 +198,8 @@ proxies:
     skip-cert-verify: true
   - name: "xhttp-${SELECTED_PROTOCOL}-UDP"
     type: vless
-    server: ${LOCAL_IP}
-    port: ${CUSTOM_PORT}
+    server: ${HOST_ADDR}
+    port: ${LINK_PORT}
     uuid: ${UUID}
     network: xhttp
     xhttp:
@@ -204,8 +215,8 @@ EOF
     {
       "type": "vless",
       "tag": "xhttp-node-TCP",
-      "server": "${LOCAL_IP}",
-      "server_port": ${CUSTOM_PORT},
+      "server": "${HOST_ADDR}",
+      "server_port": ${LINK_PORT},
       "uuid": "${UUID}",
       "flow": "xtls-rprx-vision",
       "transport": {
@@ -217,8 +228,8 @@ EOF
     {
       "type": "vless",
       "tag": "xhttp-node-UDP",
-      "server": "${LOCAL_IP}",
-      "server_port": ${CUSTOM_PORT},
+      "server": "${HOST_ADDR}",
+      "server_port": ${LINK_PORT},
       "uuid": "${UUID}",
       "packet_encoding": "xudp",
       "transport": {
@@ -282,7 +293,7 @@ protocol_menu() {
             echo -e "----------------------------------------"
             read -p "是否需要配置固定隧道？[y/N]: " configure_tunnel
             if [[ "$configure_tunnel" =~ ^[Yy]$ ]]; then
-                read -p "请输入固定隧道域名: " TUNNEL_DOMAIN
+                read -p "请输入固定隧道域名 (如 tunnel.yourdomain.com): " TUNNEL_DOMAIN
                 read -p "请输入固定隧道 Token 密钥: " TUNNEL_TOKEN
                 TUNNEL_STATUS="已绑定"
             else
@@ -322,28 +333,23 @@ do_install() {
     cp "$0" /usr/local/bin/xhttp
     chmod +x /usr/local/bin/xhttp
 
-    # 同时自动生成一次本地订阅
     generate_sub_files
     SUB_ENABLED="1"
     save_status
 
-    LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
-    [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
-    TCP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-TCP"
-    UDP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-UDP"
-
     clear
-    echo -e "${GREEN}======================================================${SPAN}"
+    echo -e "${GREEN}======================================================${PLAIN}"
     echo -e "${GREEN}  xhttp 安装成功！全局指令 'xhttp' 已生效               ${PLAIN}"
     echo -e "${GREEN}======================================================${PLAIN}"
     echo -e "当前协议组合 : ${BLUE}${SELECTED_PROTOCOL}${PLAIN}"
     echo -e "服务监听端口 : ${BLUE}${CUSTOM_PORT}${PLAIN}"
+    echo -e "固定隧道域名 : ${BLUE}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
     echo -e "节点 UUID    : ${BLUE}${UUID}${PLAIN}"
     echo -e "------------------------------------------------------"
-    echo -e "${YELLOW}【TCP 隧道节点分享链接】${PLAIN}"
+    echo -e "${YELLOW}【固定隧道 TCP 节点链接】${PLAIN}"
     echo -e "${GREEN}${TCP_LINK}${PLAIN}"
     echo -e "------------------------------------------------------"
-    echo -e "${YELLOW}【UDP 隧道节点分享链接】${PLAIN}"
+    echo -e "${YELLOW}【固定隧道 UDP 节点链接】${PLAIN}"
     echo -e "${GREEN}${UDP_LINK}${PLAIN}"
     echo -e "======================================================${PLAIN}"
     read -p "按回车键返回主菜单..."
@@ -389,14 +395,12 @@ sub_menu() {
                 generate_sub_files
                 LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
                 [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
-                TCP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-TCP"
-                UDP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-UDP"
                 save_status
                 clear
-                echo -e "${GREEN}本地 IP 订阅与节点链接已成功生成！${PLAIN}"
+                echo -e "${GREEN}本地 IP 订阅与隧道节点链接已成功生成！${PLAIN}"
                 echo -e "----------------------------------------"
-                echo -e "${YELLOW}【TCP 隧道节点链接】${PLAIN}${GREEN}${TCP_LINK}${PLAIN}"
-                echo -e "${YELLOW}【UDP 隧道节点链接】${PLAIN}${GREEN}${UDP_LINK}${PLAIN}"
+                echo -e "${YELLOW}【固定隧道 TCP 节点链接】${PLAIN}${GREEN}${TCP_LINK}${PLAIN}"
+                echo -e "${YELLOW}【固定隧道 UDP 节点链接】${PLAIN}${GREEN}${UDP_LINK}${PLAIN}"
                 echo -e "----------------------------------------"
                 echo -e "Clash/Mihomo 订阅地址: http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/clmi.yaml"
                 echo -e "Sing-box 订阅地址   : http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/sbox.json"
@@ -439,7 +443,7 @@ main_menu() {
     while true; do
         clear
         echo -e "${BLUE}========================================${PLAIN}"
-        echo -e "${BLUE}       xhttp 一键管理脚本 v2.3          ${PLAIN}"
+        echo -e "${BLUE}       xhttp 一键管理脚本 v2.4          ${PLAIN}"
         echo -e "${BLUE}========================================${PLAIN}"
         echo -e " ${YELLOW}【系统状态看板】${PLAIN}"
         echo -e " • 官方最新内核版本 : ${GREEN}v${LATEST_VER}${PLAIN}"
@@ -454,7 +458,7 @@ main_menu() {
         fi
         echo -e "----------------------------------------"
         echo -e " 1. 配置并选择协议组合与隧道"
-        echo -e " 2. 确认安装 xhttp 节点 (自动生成节点与订阅)"
+        echo -e " 2. 确认安装 xhttp 节点 (自动生成隧道节点与订阅)"
         echo -e " 3. 卸载脚本及内核"
         echo -e " 4. 设置本地IP订阅分享链接"
         echo -e " 0. 退出脚本"
