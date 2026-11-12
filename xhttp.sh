@@ -172,11 +172,13 @@ get_links() {
     else
         HOST_ADDR="$LOCAL_IP"
         LINK_PORT="$CUSTOM_PORT"
+    end_if="true"
     fi
 
-    # 修正为官方标准 XHTTP 传输参数 (type=xhttp, path=/xhttp, mode=auto)
-    TCP_LINK="vless://${UUID}@${HOST_ADDR}:${LINK_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp&mode=auto#xhttp-${SELECTED_PROTOCOL}-TCP隧道"
-    UDP_LINK="vless://${UUID}@${HOST_ADDR}:${LINK_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp&mode=auto#xhttp-${SELECTED_PROTOCOL}-UDP隧道"
+    # 严格对齐标准 Argo + XHTTP 格式 (包含 path、mode=auto、host 以及 sni 参数)
+    XHTTP_PATH="/${UUID}-argo"
+    TCP_LINK="vless://${UUID}@${HOST_ADDR}:${LINK_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&sni=${HOST_ADDR}&type=xhttp&path=${XHTTP_PATH}&mode=auto#H2-Argo-XHTTP-TCP隧道"
+    UDP_LINK="vless://${UUID}@${HOST_ADDR}:${LINK_PORT}?encryption=none&security=tls&sni=${HOST_ADDR}&type=xhttp&packet_encoding=xudp&path=${XHTTP_PATH}&mode=auto#H3-Argo-XHTTP-UDP隧道"
 }
 
 generate_sub_files() {
@@ -186,28 +188,30 @@ generate_sub_files() {
 
     cat <<EOF > "$SUB_DIR/$SUB_PATH/clmi.yaml"
 proxies:
-  - name: "xhttp-${SELECTED_PROTOCOL}-TCP"
+  - name: "H2-Argo-XHTTP-TCP"
     type: vless
     server: ${HOST_ADDR}
     port: ${LINK_PORT}
     uuid: ${UUID}
     network: xhttp
     xhttp:
-      path: "/xhttp"
+      path: "${XHTTP_PATH}"
       mode: "auto"
     tls: true
+    sni: ${HOST_ADDR}
     flow: xtls-rprx-vision
     skip-cert-verify: true
-  - name: "xhttp-${SELECTED_PROTOCOL}-UDP"
+  - name: "H3-Argo-XHTTP-UDP"
     type: vless
     server: ${HOST_ADDR}
     port: ${LINK_PORT}
     uuid: ${UUID}
     network: xhttp
     xhttp:
-      path: "/xhttp"
+      path: "${XHTTP_PATH}"
       mode: "auto"
     tls: true
+    sni: ${HOST_ADDR}
     packet-encoding: xudp
     skip-cert-verify: true
 EOF
@@ -217,31 +221,31 @@ EOF
   "outbounds": [
     {
       "type": "vless",
-      "tag": "xhttp-node-TCP",
+      "tag": "H2-Argo-XHTTP-TCP",
       "server": "${HOST_ADDR}",
       "server_port": ${LINK_PORT},
       "uuid": "${UUID}",
       "flow": "xtls-rprx-vision",
       "transport": {
         "type": "xhttp",
-        "path": "/xhttp",
+        "path": "${XHTTP_PATH}",
         "mode": "auto"
       },
-      "tls": { "enabled": true, "insecure": true }
+      "tls": { "enabled": true, "server_name": "${HOST_ADDR}", "insecure": true }
     },
     {
       "type": "vless",
-      "tag": "xhttp-node-UDP",
+      "tag": "H3-Argo-XHTTP-UDP",
       "server": "${HOST_ADDR}",
       "server_port": ${LINK_PORT},
       "uuid": "${UUID}",
       "packet_encoding": "xudp",
       "transport": {
         "type": "xhttp",
-        "path": "/xhttp",
+        "path": "${XHTTP_PATH}",
         "mode": "auto"
       },
-      "tls": { "enabled": true, "insecure": true }
+      "tls": { "enabled": true, "server_name": "${HOST_ADDR}", "insecure": true }
     }
   ]
 }
@@ -259,7 +263,7 @@ EOF
 protocol_menu() {
     while true; do
         clear
-        echo -e "${BLUE}=== xhttp 协议组合与隧道配置菜单 ===${PLAIN}"
+        echo -e "${BLUE}=== xhttp 协议组合与 Argo 隧道配置菜单 ===${PLAIN}"
         echo -e "当前已选协议: ${GREEN}${SELECTED_PROTOCOL:-未选择}${PLAIN}"
         echo -e "当前端口设定: ${GREEN}${CUSTOM_PORT}${PLAIN}"
         echo -e "固定隧道域名: ${GREEN}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
@@ -296,10 +300,10 @@ protocol_menu() {
 
         if [[ "$SELECTED_PROTOCOL" == *"reality"* || "$SELECTED_PROTOCOL" == *"enc"* ]]; then
             echo -e "----------------------------------------"
-            read -p "是否需要配置固定隧道？[y/N]: " configure_tunnel
+            read -p "是否需要配置 Argo 固定隧道？[y/N]: " configure_tunnel
             if [[ "$configure_tunnel" =~ ^[Yy]$ ]]; then
-                read -p "请输入固定隧道域名 (如 tunnel.yourdomain.com): " TUNNEL_DOMAIN
-                read -p "请输入固定隧道 Token 密钥: " TUNNEL_TOKEN
+                read -p "请输入 Argo 隧道域名 (如 xxx.kdns.fr): " TUNNEL_DOMAIN
+                read -p "请输入 Argo 隧道 Token 密钥: " TUNNEL_TOKEN
                 TUNNEL_STATUS="已绑定"
             else
                 TUNNEL_STATUS="未绑定"
@@ -348,13 +352,13 @@ do_install() {
     echo -e "${GREEN}======================================================${PLAIN}"
     echo -e "当前协议组合 : ${BLUE}${SELECTED_PROTOCOL}${PLAIN}"
     echo -e "服务监听端口 : ${BLUE}${CUSTOM_PORT}${PLAIN}"
-    echo -e "固定隧道域名 : ${BLUE}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
+    echo -e "Argo 隧道域名: ${BLUE}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
     echo -e "节点 UUID    : ${BLUE}${UUID}${PLAIN}"
     echo -e "------------------------------------------------------"
-    echo -e "${YELLOW}【固定隧道 TCP 节点链接】${PLAIN}"
+    echo -e "${YELLOW}【Argo 隧道 H2-XHTTP-TCP 节点链接】${PLAIN}"
     echo -e "${GREEN}${TCP_LINK}${PLAIN}"
     echo -e "------------------------------------------------------"
-    echo -e "${YELLOW}【固定隧道 UDP 节点链接】${PLAIN}"
+    echo -e "${YELLOW}【Argo 隧道 H3-XHTTP-UDP 节点链接】${PLAIN}"
     echo -e "${GREEN}${UDP_LINK}${PLAIN}"
     echo -e "======================================================${PLAIN}"
     read -p "按回车键返回主菜单..."
@@ -402,10 +406,10 @@ sub_menu() {
                 [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
                 save_status
                 clear
-                echo -e "${GREEN}本地 IP 订阅与隧道节点链接已成功生成！${PLAIN}"
+                echo -e "${GREEN}本地 IP 订阅与 Argo 隧道节点链接已成功生成！${PLAIN}"
                 echo -e "----------------------------------------"
-                echo -e "${YELLOW}【固定隧道 TCP 节点链接】${PLAIN}${GREEN}${TCP_LINK}${PLAIN}"
-                echo -e "${YELLOW}【固定隧道 UDP 节点链接】${PLAIN}${GREEN}${UDP_LINK}${PLAIN}"
+                echo -e "${YELLOW}【Argo 隧道 H2-TCP 节点链接】${PLAIN}${GREEN}${TCP_LINK}${PLAIN}"
+                echo -e "${YELLOW}【Argo 隧道 H3-UDP 节点链接】${PLAIN}${GREEN}${UDP_LINK}${PLAIN}"
                 echo -e "----------------------------------------"
                 echo -e "Clash/Mihomo 订阅地址: http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/clmi.yaml"
                 echo -e "Sing-box 订阅地址   : http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/sbox.json"
@@ -448,13 +452,13 @@ main_menu() {
     while true; do
         clear
         echo -e "${BLUE}========================================${PLAIN}"
-        echo -e "${BLUE}       xhttp 一键管理脚本 v2.5          ${PLAIN}"
+        echo -e "${BLUE}       xhttp 一键管理脚本 v2.6          ${PLAIN}"
         echo -e "${BLUE}========================================${PLAIN}"
         echo -e " ${YELLOW}【系统状态看板】${PLAIN}"
         echo -e " • 官方最新内核版本 : ${GREEN}v${LATEST_VER}${PLAIN}"
         echo -e " • 当前协议组合     : ${GREEN}${SELECTED_PROTOCOL:-未配置}${PLAIN}"
         echo -e " • 监听服务端口     : ${GREEN}${CUSTOM_PORT}${PLAIN}"
-        echo -e " • 固定隧道域名     : ${GREEN}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
+        echo -e " • Argo 隧道域名    : ${GREEN}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
         echo -e " • 隧道Token状态    : ${GREEN}${TUNNEL_STATUS}${PLAIN}"
         if [ "$SUB_ENABLED" = "1" ]; then
             echo -e " • 本地订阅服务     : ${GREEN}运行中 (端口: ${SUB_PORT}) [路径: /${SUB_PATH}/]${PLAIN}"
@@ -462,8 +466,8 @@ main_menu() {
             echo -e " • 本地订阅服务     : ${YELLOW}未开启${PLAIN}"
         fi
         echo -e "----------------------------------------"
-        echo -e " 1. 配置并选择协议组合与隧道"
-        echo -e " 2. 确认安装 xhttp 节点 (自动生成隧道节点与订阅)"
+        echo -e " 1. 配置并选择协议组合与 Argo 隧道"
+        echo -e " 2. 确认安装 xhttp 节点 (生成标准 Argo 节点与订阅)"
         echo -e " 3. 卸载脚本及内核"
         echo -e " 4. 设置本地IP订阅分享链接"
         echo -e " 0. 退出脚本"
