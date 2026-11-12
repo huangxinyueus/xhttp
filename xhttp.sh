@@ -12,13 +12,11 @@ PLAIN='\033[0m'
 
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：请以 root 用户运行此脚本！${PLAIN}" && exit 1
 
-# 配置文件与状态存储路径
 CONFIG_DIR="/etc/xhttp"
 STATUS_FILE="$CONFIG_DIR/status.conf"
 
 mkdir -p "$CONFIG_DIR"
 
-# 加载或初始化状态
 load_status() {
     if [ -f "$STATUS_FILE" ]; then
         source "$STATUS_FILE"
@@ -63,7 +61,7 @@ check_os() {
         ubuntu|debian) PKG_MANAGER="apt" ;;
         alpine) PKG_MANAGER="apk" ;;
         *) echo -e "${RED}暂不支持的系统: $OS。仅支持 Ubuntu, Debian, Alpine。${PLAIN}" && exit 1 ;;
-    es}
+    esac
 }
 
 install_dependencies() {
@@ -76,7 +74,7 @@ install_dependencies() {
 
 get_latest_version() {
     TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-    [ -z "$TAG" ] && TAG="1.10.0 (获取失败或本地离线)"
+    [ -z "$TAG" ] && TAG="1.10.0"
     echo "$TAG"
 }
 
@@ -90,7 +88,7 @@ install_singbox() {
         x86_64) ARCH="amd64" ;;
         aarch64) ARCH="arm64" ;;
         *) echo -e "${RED}不支持的架构: $ARCH${PLAIN}" && exit 1 ;;
-    es}
+    esac
 
     DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${TAG_VER}/sing-box-${TAG_VER}-linux-${ARCH}.tar.gz"
     curl -L -o sing-box.tar.gz "$DOWNLOAD_URL"
@@ -168,7 +166,6 @@ generate_sub_files() {
     LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
     [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
 
-    # 生成 Clash/Mihomo 配置
     cat <<EOF > "$SUB_DIR/$SUB_PATH/clmi.yaml"
 proxies:
   - name: "xhttp-${SELECTED_PROTOCOL}"
@@ -184,7 +181,6 @@ proxies:
     skip-cert-verify: true
 EOF
 
-    # 生成 Sing-box 配置
     cat <<EOF > "$SUB_DIR/$SUB_PATH/sbox.json"
 {
   "outbounds": [
@@ -209,18 +205,15 @@ EOF
 }
 EOF
 
-    # 生成聚合协议文本
     cat <<EOF > "$SUB_DIR/$SUB_PATH/jhsub.txt"
 vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-%E8%81%9A%E5%90%88%E8%AE%A2%E9%98%85
 EOF
 
-    # 启动一个简易 Python HTTP 服务器用于本地订阅托管
     pkill -f "python3 -m http.server $SUB_PORT" 2>/dev/null
     cd "$SUB_DIR" && nohup python3 -m http.server "$SUB_PORT" >/dev/null 2>&1 &
     cd - >/dev/null
 }
 
-# 菜单 1：协议组合选择与隧道设置
 protocol_menu() {
     while true; do
         clear
@@ -278,7 +271,6 @@ protocol_menu() {
             CUSTOM_PORT="$input_port"
         fi
 
-        # 针对 1 和 2 协议支持隧道配置询问
         if [[ "$SELECTED_PROTOCOL" == *"reality"* || "$SELECTED_PROTOCOL" == *"enc"* ]]; then
             echo -e "----------------------------------------"
             read -p "是否需要配置固定隧道 / Cloudflare Tunnel Token? [y/N]: " configure_tunnel
@@ -299,7 +291,6 @@ protocol_menu() {
     done
 }
 
-# 菜单 2：确认安装
 do_install() {
     if [ -z "$SELECTED_PROTOCOL" ]; then
         echo -e "${RED}错误：您尚未在菜单 1 中选择任何协议组合！请先选择协议。${PLAIN}"
@@ -320,14 +311,8 @@ do_install() {
         rc-service sing-box restart
     fi
 
-    # 注册全局快捷指令 "xhttp"
-    if [ -f /usr/local/bin/hxttp.sh ]; then
-        ln -sf /usr/local/bin/hxttp.sh /usr/local/bin/xhttp
-    else
-        # 将当前脚本复制到全局 bin
-        cp "$0" /usr/local/bin/xhttp
-        chmod +x /usr/local/bin/xhttp
-    fi
+    cp "$0" /usr/local/bin/xhttp
+    chmod +x /usr/local/bin/xhttp
 
     save_status
     echo -e "${GREEN}========================================${PLAIN}"
@@ -339,7 +324,6 @@ do_install() {
     read -p "按回车键返回主菜单..."
 }
 
-# 菜单 3：卸载脚本及内核
 do_uninstall() {
     read -p "确认要完全卸载 xhttp (sing-box) 吗？[y/N]: " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
@@ -362,7 +346,6 @@ do_uninstall() {
     read -p "按回车键返回主菜单..."
 }
 
-# 菜单 4：设置本地IP订阅分享链接 (对应您的子菜单需求)
 sub_menu() {
     while true; do
         clear
@@ -424,11 +407,8 @@ sub_menu() {
     done
 }
 
-# 主菜单循环
 main_menu() {
     LATEST_VER=$(get_latest_version)
-    LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
-    [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
 
     while true; do
         clear
