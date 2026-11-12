@@ -21,14 +21,14 @@ load_status() {
     if [ -f "$STATUS_FILE" ]; then
         source "$STATUS_FILE"
     else
-        SELECTED_PROTOCOL=""
+        SELECTED_PROTOCOL="Vless-xhttp-enc"
         CUSTOM_PORT=$((RANDOM % 50000 + 10000))
         DOMAIN=""
         TUNNEL_STATUS="未绑定"
         TUNNEL_DOMAIN=""
         TUNNEL_TOKEN=""
         UUID=$(cat /proc/sys/kernel/random/uuid)
-        SUB_PORT="11111"
+        SUB_PORT=$((RANDOM % 40000 + 10000))
         SUB_PATH="$UUID"
         SUB_ENABLED="0"
     fi
@@ -168,6 +168,10 @@ generate_sub_files() {
     LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
     [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
 
+    # 生成真实的 TCP 和 UDP 节点分享链接
+    TCP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-TCP"
+    UDP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-UDP"
+
     cat <<EOF > "$SUB_DIR/$SUB_PATH/clmi.yaml"
 proxies:
   - name: "xhttp-${SELECTED_PROTOCOL}-TCP"
@@ -228,10 +232,11 @@ EOF
 EOF
 
     cat <<EOF > "$SUB_DIR/$SUB_PATH/jhsub.txt"
-vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-TCP隧道
-vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-UDP隧道
+${TCP_LINK}
+${UDP_LINK}
 EOF
 
+    pkill -f "python3 -m http.server $SUB_PORT" 2>/dev/null
     (cd "$SUB_DIR" && nohup python3 -m http.server "$SUB_PORT" >/dev/null 2>&1 &)
 }
 
@@ -253,53 +258,33 @@ protocol_menu() {
         read -p "请选择协议编号 [1-4] (直接回车可保持/跳过): " proto_choice
 
         case "$proto_choice" in
-            1)
-                SELECTED_PROTOCOL="Vless-xhttp-reality-enc"
-                echo -e "${GREEN}已选择: Vless-xhttp-reality-enc${PLAIN}"
-                ;;
-            2)
-                SELECTED_PROTOCOL="Vless-xhttp-enc"
-                echo -e "${GREEN}已选择: Vless-xhttp-enc${PLAIN}"
-                ;;
-            3)
+            1) SELECTED_PROTOCOL="Vless-xhttp-reality-enc" ;;
+            2) SELECTED_PROTOCOL="Vless-xhttp-enc" ;;
+            3) 
                 SELECTED_PROTOCOL="Vless-xhttp-tls-UDP"
-                echo -e "${GREEN}已选择: Vless-xhttp-tls-UDP (需要绑定域名)${PLAIN}"
                 read -p "请输入您的合法域名 (直接回车跳过): " input_domain
                 [ -n "$input_domain" ] && DOMAIN="$input_domain"
                 ;;
-            4)
+            4) 
                 SELECTED_PROTOCOL="Vless-xhttp-tls-TCP/UDP"
-                echo -e "${GREEN}已选择: Vless-xhttp-tls-TCP/UDP (需要绑定域名)${PLAIN}"
                 read -p "请输入您的合法域名 (直接回车跳过): " input_domain
                 [ -n "$input_domain" ] && DOMAIN="$input_domain"
                 ;;
-            0)
-                save_status
-                return
-                ;;
-            "")
-                echo -e "${YELLOW}保持当前选择，进入下一步设置...${PLAIN}"
-                ;;
-            *)
-                echo -e "${RED}无效的选择，请重新输入！${PLAIN}"
-                sleep 1
-                continue
-                ;;
+            0) save_status; return ;;
+            "") ;;
+            *) echo -e "${RED}无效选择！${PLAIN}"; sleep 1; continue ;;
         esac
 
-        read -p "请输入自定义端口 [留空或直接回车则保持随机端口 ${CUSTOM_PORT}]: " input_port
-        if [ -n "$input_port" ]; then
-            CUSTOM_PORT="$input_port"
-        fi
+        read -p "请输入自定义端口 [留空则保持随机端口 ${CUSTOM_PORT}]: " input_port
+        [ -n "$input_port" ] && CUSTOM_PORT="$input_port"
 
         if [[ "$SELECTED_PROTOCOL" == *"reality"* || "$SELECTED_PROTOCOL" == *"enc"* ]]; then
             echo -e "----------------------------------------"
             read -p "是否需要配置固定隧道？[y/N]: " configure_tunnel
             if [[ "$configure_tunnel" =~ ^[Yy]$ ]]; then
-                read -p "请输入固定隧道域名 (如 tunnel.yourdomain.com): " TUNNEL_DOMAIN
+                read -p "请输入固定隧道域名: " TUNNEL_DOMAIN
                 read -p "请输入固定隧道 Token 密钥: " TUNNEL_TOKEN
-                TUNNEL_STATUS="已绑定 (Token已加密隐藏)"
-                echo -e "${GREEN}固定隧道参数已完整记录！${PLAIN}"
+                TUNNEL_STATUS="已绑定"
             else
                 TUNNEL_STATUS="未绑定"
                 TUNNEL_DOMAIN=""
@@ -316,7 +301,7 @@ protocol_menu() {
 
 do_install() {
     if [ -z "$SELECTED_PROTOCOL" ]; then
-        echo -e "${RED}错误：您尚未在菜单 1 中选择任何协议组合！请先选择协议。${PLAIN}"
+        echo -e "${RED}错误：请先在菜单 1 中选择协议组合！${PLAIN}"
         sleep 2
         return
     fi
@@ -337,13 +322,30 @@ do_install() {
     cp "$0" /usr/local/bin/xhttp
     chmod +x /usr/local/bin/xhttp
 
+    # 同时自动生成一次本地订阅
+    generate_sub_files
+    SUB_ENABLED="1"
     save_status
-    echo -e "${GREEN}========================================${PLAIN}"
-    echo -e "${GREEN}  xhttp 安装成功！全局指令 'xhttp' 已生效 ${PLAIN}"
-    echo -e "${GREEN}  当前组合: ${SELECTED_PROTOCOL}        ${PLAIN}"
-    echo -e "${GREEN}  监听端口: ${CUSTOM_PORT}              ${PLAIN}"
-    echo -e "${GREEN}  节点 UUID: ${UUID}                    ${PLAIN}"
-    echo -e "${GREEN}========================================${PLAIN}"
+
+    LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
+    [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
+    TCP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-TCP"
+    UDP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-UDP"
+
+    clear
+    echo -e "${GREEN}======================================================${SPAN}"
+    echo -e "${GREEN}  xhttp 安装成功！全局指令 'xhttp' 已生效               ${PLAIN}"
+    echo -e "${GREEN}======================================================${PLAIN}"
+    echo -e "当前协议组合 : ${BLUE}${SELECTED_PROTOCOL}${PLAIN}"
+    echo -e "服务监听端口 : ${BLUE}${CUSTOM_PORT}${PLAIN}"
+    echo -e "节点 UUID    : ${BLUE}${UUID}${PLAIN}"
+    echo -e "------------------------------------------------------"
+    echo -e "${YELLOW}【TCP 隧道节点分享链接】${PLAIN}"
+    echo -e "${GREEN}${TCP_LINK}${PLAIN}"
+    echo -e "------------------------------------------------------"
+    echo -e "${YELLOW}【UDP 隧道节点分享链接】${PLAIN}"
+    echo -e "${GREEN}${UDP_LINK}${PLAIN}"
+    echo -e "======================================================${PLAIN}"
     read -p "按回车键返回主菜单..."
 }
 
@@ -387,34 +389,32 @@ sub_menu() {
                 generate_sub_files
                 LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
                 [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
+                TCP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&type=xhttp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-TCP"
+                UDP_LINK="vless://${UUID}@${LOCAL_IP}:${CUSTOM_PORT}?encryption=none&security=tls&type=xhttp&packet_encoding=xudp&path=%2Fxhttp#xhttp-${SELECTED_PROTOCOL}-UDP"
                 save_status
-                echo -e "${GREEN}本地 IP 订阅链接已成功生成并挂载！${PLAIN}"
+                clear
+                echo -e "${GREEN}本地 IP 订阅与节点链接已成功生成！${PLAIN}"
                 echo -e "----------------------------------------"
-                echo -e "Clash/Mihomo本地IP订阅地址：http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/clmi.yaml"
-                echo -e "Sing-box本地IP订阅地址：http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/sbox.json"
-                echo -e "聚合协议本地IP订阅地址：http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/jhsub.txt"
+                echo -e "${YELLOW}【TCP 隧道节点链接】${PLAIN}${GREEN}${TCP_LINK}${PLAIN}"
+                echo -e "${YELLOW}【UDP 隧道节点链接】${PLAIN}${GREEN}${UDP_LINK}${PLAIN}"
+                echo -e "----------------------------------------"
+                echo -e "Clash/Mihomo 订阅地址: http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/clmi.yaml"
+                echo -e "Sing-box 订阅地址   : http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/sbox.json"
+                echo -e "聚合协议 订阅地址   : http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/jhsub.txt"
                 echo -e "----------------------------------------"
                 read -p "按回车键继续..."
                 ;;
             2)
-                read -p "请输入新的路径密码 (直接回车可恢复默认节点UUID路径): " new_path
-                if [ -n "$new_path" ]; then
-                    SUB_PATH="$new_path"
-                else
-                    SUB_PATH="$UUID"
-                fi
+                read -p "请输入新的路径密码 (直接回车恢复默认UUID): " new_path
+                [ -n "$new_path" ] && SUB_PATH="$new_path" || SUB_PATH="$UUID"
                 generate_sub_files
                 save_status
-                echo -e "${GREEN}订阅路径密码已更新为: ${SUB_PATH}${PLAIN}"
+                echo -e "${GREEN}订阅路径已更新为: ${SUB_PATH}${PLAIN}"
                 read -p "按回车键继续..."
                 ;;
             3)
-                read -p "请输入新的订阅端口 [默认 11111, 留空则随机]: " new_port
-                if [ -n "$new_port" ]; then
-                    SUB_PORT="$new_port"
-                else
-                    SUB_PORT=$((RANDOM % 40000 + 10000))
-                fi
+                read -p "请输入新的订阅端口 [留空则随机]: " new_port
+                [ -n "$new_port" ] && SUB_PORT="$new_port" || SUB_PORT=$((RANDOM % 40000 + 10000))
                 generate_sub_files
                 save_status
                 echo -e "${GREEN}订阅端口已更新为: ${SUB_PORT}${PLAIN}"
@@ -424,16 +424,11 @@ sub_menu() {
                 SUB_ENABLED="0"
                 pkill -f "python3 -m http.server $SUB_PORT" 2>/dev/null
                 save_status
-                echo -e "${GREEN}本地 IP 订阅链接已卸载关闭。${PLAIN}"
+                echo -e "${GREEN}本地 IP 订阅服务已关闭。${PLAIN}"
                 read -p "按回车键继续..."
                 ;;
-            0)
-                return
-                ;;
-            *)
-                echo -e "${RED}无效选项！${PLAIN}"
-                sleep 1
-                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项！${PLAIN}"; sleep 1 ;;
         esac
     done
 }
@@ -444,7 +439,7 @@ main_menu() {
     while true; do
         clear
         echo -e "${BLUE}========================================${PLAIN}"
-        echo -e "${BLUE}       xhttp 一键管理脚本 v2.2          ${PLAIN}"
+        echo -e "${BLUE}       xhttp 一键管理脚本 v2.3          ${PLAIN}"
         echo -e "${BLUE}========================================${PLAIN}"
         echo -e " ${YELLOW}【系统状态看板】${PLAIN}"
         echo -e " • 官方最新内核版本 : ${GREEN}v${LATEST_VER}${PLAIN}"
@@ -459,7 +454,7 @@ main_menu() {
         fi
         echo -e "----------------------------------------"
         echo -e " 1. 配置并选择协议组合与隧道"
-        echo -e " 2. 确认安装 xhttp 节点 (注册快捷指令 'xhttp')"
+        echo -e " 2. 确认安装 xhttp 节点 (自动生成节点与订阅)"
         echo -e " 3. 卸载脚本及内核"
         echo -e " 4. 设置本地IP订阅分享链接"
         echo -e " 0. 退出脚本"
