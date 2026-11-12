@@ -146,13 +146,12 @@ generate_config() {
       "users": [
         {
           "name": "xhttp-user",
-          "uuid": "$UUID",
-          "flow": "xtls-rprx-vision"
+          "uuid": "$UUID"
         }
       ],
       "transport": {
         "type": "xhttp",
-        "path": "/xhttp",
+        "path": "/${UUID}-argo",
         "mode": "auto"
       }
     }
@@ -166,19 +165,21 @@ get_links() {
     LOCAL_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
     [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
 
+    # 严格匹配您提供的标准模板：地址使用优质CDN节点，SNI/Host 指向 Argo 隧道域名
     if [ -n "$TUNNEL_DOMAIN" ]; then
-        HOST_ADDR="$TUNNEL_DOMAIN"
-        LINK_PORT="443"
+        SNI_HOST="$TUNNEL_DOMAIN"
     else
-        HOST_ADDR="$LOCAL_IP"
-        LINK_PORT="$CUSTOM_PORT"
-    end_if="true"
+        SNI_HOST="$LOCAL_IP"
     fi
 
-    # 严格对齐标准 Argo + XHTTP 格式 (包含 path、mode=auto、host 以及 sni 参数)
     XHTTP_PATH="/${UUID}-argo"
-    TCP_LINK="vless://${UUID}@${HOST_ADDR}:${LINK_PORT}?encryption=none&flow=xtls-rprx-vision&security=tls&sni=${HOST_ADDR}&type=xhttp&path=${XHTTP_PATH}&mode=auto#H2-Argo-XHTTP-TCP隧道"
-    UDP_LINK="vless://${UUID}@${HOST_ADDR}:${LINK_PORT}?encryption=none&security=tls&sni=${HOST_ADDR}&type=xhttp&packet_encoding=xudp&path=${XHTTP_PATH}&mode=auto#H3-Argo-XHTTP-UDP隧道"
+    
+    # 完全对齐您提供的 H2 和 H3 标准格式
+    H2_ADDR="www.visa.com.hk"
+    H3_ADDR="www.teamviewer.com"
+
+    TCP_LINK="vless://${UUID}@${H2_ADDR}:443?encryption=none&security=tls&sni=${SNI_HOST}&fp=chrome&alpn=h2&type=xhttp&host=${SNI_HOST}&path=${XHTTP_PATH}&mode=auto#%E1%B4%9C%EA%9C%B1%20H2-Argo%20XHTTP%20%E1%B4%87%EA%9C%B1%EA%9C%B1"
+    UDP_LINK="vless://${UUID}@${H3_ADDR}:443?encryption=none&security=tls&sni=${SNI_HOST}&fp=chrome&alpn=h3&type=xhttp&host=${SNI_HOST}&path=${XHTTP_PATH}&mode=auto#%E1%B4%9C%EA%9C%B1%20H3-Argo%20XHTTP%20%E1%B4%87%EA%9C%B1%EA%9C%B1"
 }
 
 generate_sub_files() {
@@ -188,31 +189,35 @@ generate_sub_files() {
 
     cat <<EOF > "$SUB_DIR/$SUB_PATH/clmi.yaml"
 proxies:
-  - name: "H2-Argo-XHTTP-TCP"
+  - name: "Ṝ H2-Argo XHTTP ᴱṜṜ"
     type: vless
-    server: ${HOST_ADDR}
-    port: ${LINK_PORT}
+    server: ${H2_ADDR}
+    port: 443
     uuid: ${UUID}
     network: xhttp
     xhttp:
       path: "${XHTTP_PATH}"
       mode: "auto"
+      host: "${SNI_HOST}"
     tls: true
-    sni: ${HOST_ADDR}
-    flow: xtls-rprx-vision
+    sni: ${SNI_HOST}
+    alpn: [h2]
+    client-fingerprint: chrome
     skip-cert-verify: true
-  - name: "H3-Argo-XHTTP-UDP"
+  - name: "Ṝ H3-Argo XHTTP ᴱṜṜ"
     type: vless
-    server: ${HOST_ADDR}
-    port: ${LINK_PORT}
+    server: ${H3_ADDR}
+    port: 443
     uuid: ${UUID}
     network: xhttp
     xhttp:
       path: "${XHTTP_PATH}"
       mode: "auto"
+      host: "${SNI_HOST}"
     tls: true
-    sni: ${HOST_ADDR}
-    packet-encoding: xudp
+    sni: ${SNI_HOST}
+    alpn: [h3]
+    client-fingerprint: chrome
     skip-cert-verify: true
 EOF
 
@@ -221,31 +226,43 @@ EOF
   "outbounds": [
     {
       "type": "vless",
-      "tag": "H2-Argo-XHTTP-TCP",
-      "server": "${HOST_ADDR}",
-      "server_port": ${LINK_PORT},
+      "tag": "H2-Argo-XHTTP",
+      "server": "${H2_ADDR}",
+      "server_port": 443,
       "uuid": "${UUID}",
-      "flow": "xtls-rprx-vision",
       "transport": {
         "type": "xhttp",
         "path": "${XHTTP_PATH}",
-        "mode": "auto"
+        "mode": "auto",
+        "host": "${SNI_HOST}"
       },
-      "tls": { "enabled": true, "server_name": "${HOST_ADDR}", "insecure": true }
+      "tls": {
+        "enabled": true,
+        "server_name": "${SNI_HOST}",
+        "utls": { "enabled": true, "fingerprint": "chrome" },
+        "alpn": ["h2"],
+        "insecure": true
+      }
     },
     {
       "type": "vless",
-      "tag": "H3-Argo-XHTTP-UDP",
-      "server": "${HOST_ADDR}",
-      "server_port": ${LINK_PORT},
+      "tag": "H3-Argo-XHTTP",
+      "server": "${H3_ADDR}",
+      "server_port": 443,
       "uuid": "${UUID}",
-      "packet_encoding": "xudp",
       "transport": {
         "type": "xhttp",
         "path": "${XHTTP_PATH}",
-        "mode": "auto"
+        "mode": "auto",
+        "host": "${SNI_HOST}"
       },
-      "tls": { "enabled": true, "server_name": "${HOST_ADDR}", "insecure": true }
+      "tls": {
+        "enabled": true,
+        "server_name": "${SNI_HOST}",
+        "utls": { "enabled": true, "fingerprint": "chrome" },
+        "alpn": ["h3"],
+        "insecure": true
+      }
     }
   ]
 }
@@ -302,7 +319,7 @@ protocol_menu() {
             echo -e "----------------------------------------"
             read -p "是否需要配置 Argo 固定隧道？[y/N]: " configure_tunnel
             if [[ "$configure_tunnel" =~ ^[Yy]$ ]]; then
-                read -p "请输入 Argo 隧道域名 (如 xxx.kdns.fr): " TUNNEL_DOMAIN
+                read -p "请输入 Argo 隧道域名 (如 111.nvren.de5.net): " TUNNEL_DOMAIN
                 read -p "请输入 Argo 隧道 Token 密钥: " TUNNEL_TOKEN
                 TUNNEL_STATUS="已绑定"
             else
@@ -355,10 +372,10 @@ do_install() {
     echo -e "Argo 隧道域名: ${BLUE}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
     echo -e "节点 UUID    : ${BLUE}${UUID}${PLAIN}"
     echo -e "------------------------------------------------------"
-    echo -e "${YELLOW}【Argo 隧道 H2-XHTTP-TCP 节点链接】${PLAIN}"
+    echo -e "${YELLOW}【H2-Argo XHTTP 节点链接】${PLAIN}"
     echo -e "${GREEN}${TCP_LINK}${PLAIN}"
     echo -e "------------------------------------------------------"
-    echo -e "${YELLOW}【Argo 隧道 H3-XHTTP-UDP 节点链接】${PLAIN}"
+    echo -e "${YELLOW}【H3-Argo XHTTP 节点链接】${PLAIN}"
     echo -e "${GREEN}${UDP_LINK}${PLAIN}"
     echo -e "======================================================${PLAIN}"
     read -p "按回车键返回主菜单..."
@@ -406,10 +423,10 @@ sub_menu() {
                 [ -z "$LOCAL_IP" ] && LOCAL_IP="127.0.0.1"
                 save_status
                 clear
-                echo -e "${GREEN}本地 IP 订阅与 Argo 隧道节点链接已成功生成！${PLAIN}"
+                echo -e "${GREEN}本地 IP 订阅与标准 Argo 节点链接已成功生成！${PLAIN}"
                 echo -e "----------------------------------------"
-                echo -e "${YELLOW}【Argo 隧道 H2-TCP 节点链接】${PLAIN}${GREEN}${TCP_LINK}${PLAIN}"
-                echo -e "${YELLOW}【Argo 隧道 H3-UDP 节点链接】${PLAIN}${GREEN}${UDP_LINK}${PLAIN}"
+                echo -e "${YELLOW}【H2-Argo 节点链接】${PLAIN}${GREEN}${TCP_LINK}${PLAIN}"
+                echo -e "${YELLOW}【H3-Argo 节点链接】${PLAIN}${GREEN}${UDP_LINK}${PLAIN}"
                 echo -e "----------------------------------------"
                 echo -e "Clash/Mihomo 订阅地址: http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/clmi.yaml"
                 echo -e "Sing-box 订阅地址   : http://${LOCAL_IP}:${SUB_PORT}/${SUB_PATH}/sbox.json"
@@ -452,13 +469,13 @@ main_menu() {
     while true; do
         clear
         echo -e "${BLUE}========================================${PLAIN}"
-        echo -e "${BLUE}       xhttp 一键管理脚本 v2.6          ${PLAIN}"
+        echo -e "${BLUE}       xhttp 一键管理脚本 v2.7          ${PLAIN}"
         echo -e "${BLUE}========================================${PLAIN}"
         echo -e " ${YELLOW}【系统状态看板】${PLAIN}"
         echo -e " • 官方最新内核版本 : ${GREEN}v${LATEST_VER}${PLAIN}"
         echo -e " • 当前协议组合     : ${GREEN}${SELECTED_PROTOCOL:-未配置}${PLAIN}"
         echo -e " • 监听服务端口     : ${GREEN}${CUSTOM_PORT}${PLAIN}"
-        echo -e " • Argo 隧道域名    : ${GREEN}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
+        echo -e " • 固定隧道域名     : ${GREEN}${TUNNEL_DOMAIN:-未绑定}${PLAIN}"
         echo -e " • 隧道Token状态    : ${GREEN}${TUNNEL_STATUS}${PLAIN}"
         if [ "$SUB_ENABLED" = "1" ]; then
             echo -e " • 本地订阅服务     : ${GREEN}运行中 (端口: ${SUB_PORT}) [路径: /${SUB_PATH}/]${PLAIN}"
@@ -466,8 +483,8 @@ main_menu() {
             echo -e " • 本地订阅服务     : ${YELLOW}未开启${PLAIN}"
         fi
         echo -e "----------------------------------------"
-        echo -e " 1. 配置并选择协议组合与 Argo 隧道"
-        echo -e " 2. 确认安装 xhttp 节点 (生成标准 Argo 节点与订阅)"
+        echo -e " 1. 配置并选择协议组合与隧道"
+        echo -e " 2. 确认安装 xhttp 节点 (生成标准 Argo H2/H3 节点与订阅)"
         echo -e " 3. 卸载脚本及内核"
         echo -e " 4. 设置本地IP订阅分享链接"
         echo -e " 0. 退出脚本"
