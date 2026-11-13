@@ -87,42 +87,63 @@ make_reality_keys(){
   [[ -n "$REALITY_PRIVATE" && -n "$REALITY_PUBLIC" ]] || { printf '%s\n' "$output"; die '无法解析 Xray REALITY 密钥输出'; }
   REALITY_SHORT_ID="$(openssl rand -hex 4)"; REALITY_SNI=www.microsoft.com
 }
+
+
 build_config(){
-  local inbound stream tls_settings='{}' listen_addr=0.0.0.0 tmp
+  local inbound stream tls_settings='{}' listen_addr=0.0.0.0
+  local tmpdir tmp
   [[ "$TUNNEL" == yes ]] && listen_addr=127.0.0.1
+
   case "$PROTOCOL" in
-    xhttp-reality) make_reality_keys; stream="$(jq -n --arg path "$PATH_VALUE" --arg private "$REALITY_PRIVATE" --arg sni "$REALITY_SNI" --arg sid "$REALITY_SHORT_ID" '{network:"xhttp",security:"reality",xhttpSettings:{path:$path,mode:"auto"},realitySettings:{show:false,dest:($sni+":443"),xver:0,serverNames:[$sni],privateKey:$private,shortIds:[$sid]}}')";;
-    xhttp-tls|xhttp-tunnel) stream="$(jq -n --arg security "$SECURITY" --arg path "$PATH_VALUE" '{network:"xhttp",security:$security,xhttpSettings:{path:$path,mode:"auto"}}')";;
-    ws-tls|ws-tunnel) stream="$(jq -n --arg security "$SECURITY" --arg path "$PATH_VALUE" '{network:"ws",security:$security,wsSettings:{path:$path}}')";;
-    grpc-tls) stream='{"network":"grpc","security":"tls","grpcSettings":{"serviceName":"grpc"}}';;
-    httpupgrade-tls) stream="$(jq -n --arg security "$SECURITY" --arg path "$PATH_VALUE" '{network:"httpupgrade",security:$security,httpupgradeSettings:{path:$path}}')";;
-    *) die "未知协议：$PROTOCOL";;
+    xhttp-reality)
+      make_reality_keys
+      stream="$(jq -n --arg path "$PATH_VALUE" --arg private "$REALITY_PRIVATE" --arg sni "$REALITY_SNI" --arg sid "$REALITY_SHORT_ID" '{network:"xhttp",security:"reality",xhttpSettings:{path:$path,mode:"auto"},realitySettings:{show:false,dest:($sni+":443"),xver:0,serverNames:[$sni],privateKey:$private,shortIds:[$sid]}}')"
+      ;;
+    xhttp-tls|xhttp-tunnel)
+      stream="$(jq -n --arg security "$SECURITY" --arg path "$PATH_VALUE" '{network:"xhttp",security:$security,xhttpSettings:{path:$path,mode:"auto"}}')"
+      ;;
+    ws-tls|ws-tunnel)
+      stream="$(jq -n --arg security "$SECURITY" --arg path "$PATH_VALUE" '{network:"ws",security:$security,wsSettings:{path:$path}}')"
+      ;;
+    grpc-tls)
+      stream='{"network":"grpc","security":"tls","grpcSettings":{"serviceName":"grpc"}}'
+      ;;
+    httpupgrade-tls)
+      stream="$(jq -n --arg security "$SECURITY" --arg path "$PATH_VALUE" '{network:"httpupgrade",security:$security,httpupgradeSettings:{path:$path}}')"
+      ;;
+    *) die "未知协议：$PROTOCOL" ;;
   esac
-  if [[ "$SECURITY" == tls && "$TUNNEL" == no ]]; then tls_settings="$(jq -n --arg cert "$CERT_FILE" --arg key "$KEY_FILE" '{certificates:[{certificateFile:$cert,keyFile:$key}]}')"; fi
+
+  if [[ "$SECURITY" == tls && "$TUNNEL" == no ]]; then
+    tls_settings="$(jq -n --arg cert "$CERT_FILE" --arg key "$KEY_FILE" '{certificates:[{certificateFile:$cert,keyFile:$key}]}')"
+  fi
+
   inbound="$(jq -n --arg listen "$listen_addr" --argjson port "$PORT" --arg uuid "$UUID" --argjson stream "$stream" --argjson tls "$tls_settings" '{listen:$listen,port:$port,protocol:"vless",settings:{clients:[{id:$uuid}],decryption:"none"},streamSettings:($stream+(if $stream.security=="tls" then {tlsSettings:$tls} else {} end)),sniffing:{enabled:true,destOverride:["http","tls"]}}')"
-  install -d -m 0700 "$XHTTP_DIR"; tmp="$(mktemp "$XHTTP_DIR/config.XXXXXX")" || return 1
-  if ! jq -n --argjson inbound "$inbound" '{log:{loglevel:"warning"},inbounds:[$inbound],outbounds:[{protocol:"freedom",tag:"direct"}]}' > "$tmp"; then rm -f "$tmp"; return 1; fi
+
+  install -d -m 0700 "$XHTTP_DIR"
+  tmpdir="$(mktemp -d "$XHTTP_DIR/.config.XXXXXX")" || return 1
+  tmp="$tmpdir/config.json"
+
+  if ! jq -n --argjson inbound "$inbound" '{log:{loglevel:"warning"},inbounds:[$inbound],outbounds:[{protocol:"freedom",tag:"direct"}]}' > "$tmp"; then
+    rm -rf -- "$tmpdir"
+    return 1
+  fi
+
   chmod 0600 "$tmp"
-  # Validate candidate before replacing the active config.
-  if [[ -x "$XRAY_BIN" ]] && ! "$XRAY_BIN" run -test -config "$tmp"; then rm -f "$tmp"; die '新配置校验失败，原配置保持不变'; fi
-  mv -f "$tmp" "$CONFIG"
+
+  if [[ -x "$XRAY_BIN" ]] && ! "$XRAY_BIN" run -test -config "$tmp"; then
+    rm -rf -- "$tmpdir"
+    die '新配置校验失败，原配置保持不变'
+  fi
+
+  if ! mv -f "$tmp" "$CONFIG"; then
+    rm -rf -- "$tmpdir"
+    die '配置文件替换失败'
+  fi
+
+  rmdir "$tmpdir"
 }
-install_node(){
-  local tunnel_token=''
-  choose_protocol || return 0; ask_domain
-  if [[ "$TUNNEL" == yes ]] && ! valid_domain "$DOMAIN"; then die 'Cloudflare Tunnel 必须使用域名，不能使用公网 IPv4'; fi
-  PORT="$(random_port)"; UUID="$(random_uuid)"; PATH_VALUE="$(random_path)"
-  CERT_FILE=''; KEY_FILE=''; REALITY_PRIVATE=''; REALITY_PUBLIC=''; REALITY_SHORT_ID=''
-  [[ "$PROTOCOL" == grpc-tls ]] && PATH_VALUE=grpc
-  if [[ "$SECURITY" == tls && "$TUNNEL" == no ]]; then ask_tls_files; fi
-  if [[ "$TUNNEL" == yes ]]; then read -rsp 'Cloudflare Tunnel Token: ' tunnel_token; echo; [[ -n "$tunnel_token" ]] || die 'Tunnel Token 不能为空'; fi
-  core_install latest
-  build_config
-  core_validate
-  core_service_install
-  if [[ "$TUNNEL" == yes ]]; then tunnel_install "$tunnel_token"; tunnel_configure_http "$DOMAIN" "$PORT"; fi
-  save_state; print_link; ok '安装流程完成'
-}
+
 print_link(){
   local link='' link_port="$PORT"
   [[ "$TUNNEL" == yes ]] && link_port=443
