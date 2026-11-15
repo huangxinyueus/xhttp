@@ -1,0 +1,25 @@
+XHTTP Manager V4.8.3 Uninstall Fix - Test Report
+
+Source baseline: uploaded V4.8.3 main script candidate; core.sh V4.7; tunnel.sh V4.8.
+
+Checks performed
+[PASS] bash -n xhttp.sh
+[PASS] bash -n core.sh
+[PASS] bash -n tunnel.sh
+[PASS] no-candidate/no-op test: reports no verified instance and deletes nothing
+[PASS] orphaned exact systemd service test: removes matching project unit; preserves
+       unknown files in /etc/xhttp-N and /usr/local/lib/xhttp-N and leaves unrelated unit
+[PASS] multiple marked instances test: both marked instances are identified and removed
+[PASS] preflight conflict test: an unrelated/conflicting xhttp-N unit aborts before any
+       valid candidate is deleted
+
+Not performed
+- ShellCheck (not installed in the execution environment)
+- Live VPS execution or systemd service stop/restart test
+- OpenRC runtime integration test
+- Actual sing-box runtime test (no VPS access)
+
+Safety boundary
+Only exact instance-scoped service definitions and/or valid instance markers are
+eligible. No process-name or port-based cleanup is implemented. No /etc/s-box path
+is used as a deletion target.
