@@ -54,7 +54,7 @@ load_modules(){
   source "$CORE_FILE"
   # shellcheck source=/dev/null
   source "$TUNNEL_FILE"
-  [[ "${CORE_MODULE_VERSION:-}" == "4.7" && "${TUNNEL_MODULE_VERSION:-}" == "$VERSION" ]] || die '模块版本不一致'
+  [[ "${CORE_MODULE_VERSION:-}" == "4.7" && "${TUNNEL_MODULE_VERSION:-}" == "4.8" ]] || die '模块版本不一致'
   trap cleanup_bootstrap EXIT
 }
 candidate_is_owned(){
