@@ -1,25 +1,36 @@
-XHTTP Manager V4.8.3 Uninstall Fix - Test Report
+XHTTP Manager V4.8.4 - Test Report
+=================================
 
-Source baseline: uploaded V4.8.3 main script candidate; core.sh V4.7; tunnel.sh V4.8.
+Static checks
+-------------
+- bash -n xhttp.sh: PASS
+- bash -n core.sh: PASS
+- bash -n tunnel.sh: PASS
+- Module compatibility strings: core V4.7 / tunnel V4.8 retained
+- Main version: 4.8.4
+- Main menu numbering: 7 local subscription; 8 complete uninstall; uninstall remains final functional item
+- Uninstall safeguards: previous V4.8.3 preflight and exact service ownership checks retained; 4.8.3 marker accepted
+- XMUX default: no
 
-Checks performed
-[PASS] bash -n xhttp.sh
-[PASS] bash -n core.sh
-[PASS] bash -n tunnel.sh
-[PASS] no-candidate/no-op test: reports no verified instance and deletes nothing
-[PASS] orphaned exact systemd service test: removes matching project unit; preserves
-       unknown files in /etc/xhttp-N and /usr/local/lib/xhttp-N and leaves unrelated unit
-[PASS] multiple marked instances test: both marked instances are identified and removed
-[PASS] preflight conflict test: an unrelated/conflicting xhttp-N unit aborts before any
-       valid candidate is deleted
+Feature checks
+--------------
+- Tunnel node route summary includes hostname, path regex, localhost service port: PASS (static inspection)
+- Different UUID-suffixed paths can be mapped to different local ports by separate Cloudflare path ingress rules: DOCUMENTED / MANUAL CONFIGURATION
+- VLESS share link includes URL-encoded extra JSON only when XMUX is enabled: PASS (static inspection)
+- Xray client JSON carries XMUX extra only when XMUX enabled: PASS (existing generation logic)
+- Mihomo YAML reuse-settings emitted only when XMUX enabled: PASS (static inspection)
+- max-concurrency and max-connections are not simultaneously configured: PASS
 
-Not performed
-- ShellCheck (not installed in the execution environment)
-- Live VPS execution or systemd service stop/restart test
-- OpenRC runtime integration test
-- Actual sing-box runtime test (no VPS access)
+Not tested / not claimed
+------------------------
+- No live VPS deployment, systemd/OpenRC runtime, or port binding test.
+- No live Cloudflare Tunnel route/API update or public traffic test.
+- No v2rayN GUI import/runtime verification.
+- No Mihomo parser/runtime connection test.
+- No ShellCheck run.
 
-Safety boundary
-Only exact instance-scoped service definitions and/or valid instance markers are
-eligible. No process-name or port-based cleanup is implemented. No /etc/s-box path
-is used as a deletion target.
+Conclusion
+----------
+V4.8.4 is a local package with route-generation guidance and opt-in Extra/XMUX propagation. Cloudflare path ingress entries remain a manual Cloudflare-side step. Client runtime compatibility must be verified on the exact v2rayN/Mihomo versions in use before enabling XMUX in production.
+- Isolated helper test: XMUX disabled emits no extra/reuse-settings; enabled emits valid JSON and Mihomo reuse-settings with only max-concurrency: PASS.
+- Cloudflare path regex helper example (/xhttp1234 -> ^/xhttp1234(/.*)?$): PASS.
