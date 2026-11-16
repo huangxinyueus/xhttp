@@ -1,0 +1,32 @@
+XHTTP Manager V4.8.6 修订版 - 测试报告
+=======================================
+基线：用户上传的 XHTTP_Manager_V4.8.5 完整 ZIP
+测试环境：本地隔离运行环境；未连接用户 VPS
+
+本次检查结果：
+[PASS] bash -n xhttp.sh
+[PASS] bash -n core.sh
+[PASS] bash -n tunnel.sh
+[PASS] Python compile local_sub_builder.py
+[PASS] Python compile local_sub_server.py
+[PASS] core.sh unchanged from V4.8.5
+[PASS] tunnel.sh unchanged from V4.8.5
+[PASS] local_sub_server.py unchanged from V4.8.5
+[PASS] V4.8.6 version string
+[PASS] persistent xhttp launcher logic present
+[PASS] full uninstall menu option 8 present
+[PASS] local subscription menu 7 present
+[PASS] no destructive command targets sing-box.service
+[PASS] /etc/s-box not targeted by rm -rf
+
+[PASS] 订阅生成器使用合成的 xhttp-2 / xhttp-tunnel 实例成功生成 clmi.yaml、sbox.json、jhsub.txt。
+[PASS] 生成的 sbox.json 与 clmi.yaml（JSON 格式 YAML 1.2）均可被 JSON 解析器读取。
+[PASS] 合成 XHTTP Tunnel 节点生成两条变体节点链接（H2/H3）。
+[NOT RUN] 本地订阅 HTTP 服务端口联调：当前隔离环境未能成功启动监听，因此没有将 HTTP 200/404 写成通过。
+[NOT RUN] Ubuntu/Debian systemd、Alpine/OpenRC 的真实安装/卸载。
+[NOT RUN] 用户 VPS 上快捷命令实际运行、外网访问、防火墙、Tunnel 端到端和客户端导入。
+
+结论与限制：
+PASS 仅代表本地语法、基线一致性、静态逻辑和合成订阅生成测试。
+完整卸载尚未在 VPS 实机执行。请勿把本报告理解为已经在服务器上验证。
+本次没有授权、登录或修改 GitHub；没有连接、修改或删除用户 VPS。
