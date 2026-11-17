@@ -1,0 +1,46 @@
+XHTTP Manager V4.8.9 - TEST REPORT
+===================================
+
+Source basis
+------------
+- Based on the user's previously supplied XHTTP_Manager_V4.8.8_FINAL.zip.
+- Retains the V4.8.8 shell modules and protocol/Tunnel/subscription implementation.
+- V4.8.5 was not used as the source baseline.
+
+Changes
+-------
+- Version set to 4.8.9.
+- Instance selection is now fixed to INSTANCE_ID=xhttp and /etc/xhttp; no xhttp-N fallback is possible.
+- Existing xhttp adoption tolerates an incorrect marker version (such as an OS release string) only when the instance marker, state/config files, dedicated xray-xhttp binary and any present service definition agree.
+- After verified adoption, the marker is atomically rewritten to XHTTP Manager version: 4.8.9.
+- Main-menu node display no longer rejects valid nodes solely because of a legacy marker version.
+- Subscription builder validates instance identity and required state fields instead of using a hardcoded version allow-list.
+- Runtime bootstrap synchronizes the exact package's subscription builder/server as well as core/tunnel modules.
+- Uninstall retains ownership checks, removes the fixed xhttp instance, and continues to discover verifiable legacy xhttp-N resources for cleanup.
+- Existing protection for /etc/s-box, sing-box.service and unrelated generic Xray/Cloudflared resources is retained.
+
+Tests performed
+---------------
+- bash -n xhttp.sh: PASS
+- bash -n core.sh: PASS
+- bash -n tunnel.sh: PASS
+- Python compile(local_sub_builder.py, local_sub_server.py): PASS
+- Synthetic builder fixture with marker version "24.04.5 LTS (Noble Numbat)" and valid xhttp state: PASS; generated clmi.yaml, sbox.json, jhsub.txt and xray.json.
+- Synthetic builder fixture with valid legacy xhttp-N marker/state: PASS (legacy import compatibility).
+- Static checks: fixed instance selector contains no xhttp-N allocation loop; marker repair uses VERSION=4.8.9; builder no longer filters by marker version: PASS
+- ZIP integrity and SHA256 manifest: checked during packaging.
+
+Not tested / limitations
+------------------------
+- No live access to the user's VPS; no real service or node was modified by this build process.
+- No live systemd/OpenRC install, restart, reboot persistence, Cloudflare authorization, firewall reachability, or client connection test.
+- The Xray server config remains a single active inbound/config.json model. Re-running node installation updates that one active node; simultaneous multiple active nodes in the same manager require a separate multi-inbound redesign and are not claimed by this release.
+- The uninstall code is statically inspected but has not been run against a live host; back up VPS data before using full uninstall.
+
+Entry-point repair patch validation
+-----------------------------------
+- Added a guarded recovery path for a zero-byte regular /usr/local/bin/xhttp file: preserve it as xhttp.empty-backup, then recreate the managed launcher.
+- Non-empty files and symlinks remain protected by the existing ownership checks.
+- bash -n xhttp.sh: PASS (validated after patch packaging).
+- Static patch assertions and ZIP integrity: PASS.
+- No live VPS execution or service changes were performed as part of this package build.
